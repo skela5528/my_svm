@@ -7,25 +7,32 @@ Created on Fri Aug  4 17:12:46 2017
 
 import numpy as np
 import sklearn.datasets
-import matplotlib.pyplot as plt
+from sklearn.svm import SVC
 from sklearn import metrics
+import matplotlib.pyplot as plt
+from time import time
+
 
 def vis_data(data, labels):
     colors_d = {0: 'g', -1: 'g', 1: 'b'}
     colors = [colors_d[x] for x in labels]
-    plt.scatter(data[:, 0], data[:, 1],
-                marker='o',
-                s=100,
-                edgecolors=colors,
-                c='none',
-                alpha=0.7,
-                linewidths=2)
+    for label in set(labels):
+        x1, x2 = data[labels == label, 0], data[labels == label, 1]
+        plt.scatter(x1, x2,
+                    marker='o',
+                    s=100,
+                    edgecolor=colors_d[label],
+                    c='none',
+                    alpha=0.7,
+                    linewidths=2,
+                    label="Class" + str(label))
+    plt.legend()
+    plt.xlabel('feature 1')
+    plt.ylabel('feature 2')
     plt.show()
 
-d, l = sklearn.datasets.make_blobs(centers=2, cluster_std=2.5)
 
-
-class simple_svm:
+class SimpleSvm:
     x = None
     y = None
     n = None
@@ -36,9 +43,10 @@ class simple_svm:
     support_vectors = None
     tolerance = None
     max_passes = None
+    _time_to_fit = None
     _random_seed = None
 
-    def __init__(self, C=1.0, tolerance=0.1, max_passes=20, kernel='linear', random_seed=1, verbose=0):
+    def __init__(self, C=1.0, tolerance=0.05, max_passes=20, kernel='linear', random_seed=1, verbose=0):
         self.C = C
         self.tolerance = tolerance
         self.max_passes = max_passes
@@ -49,6 +57,7 @@ class simple_svm:
     def fit(self, x, y):
         self._verify_data(x, y)
 
+        st = time()
         self.x = x
         self.y = y
         self.n = len(y)
@@ -59,7 +68,7 @@ class simple_svm:
         self.b = 0
         passes_count = 0
 
-        while (passes_count < self.max_passes):
+        while passes_count < self.max_passes:
             num_changed_alphas = 0
             # for each instance
             for i in range(self.n):
@@ -74,10 +83,10 @@ class simple_svm:
 
                     # L and H
                     if self.y[i] != self.y[j]:
-                        L = max(0, self.alphas[j] - self.alphas[i])
+                        L = max(0.0, self.alphas[j] - self.alphas[i])
                         H = min(self.C, self.C + self.alphas[j] - self.alphas[i])
                     else:
-                        L = max(0, self.alphas[j] + self.alphas[i] - self.C)
+                        L = max(0.0, self.alphas[j] + self.alphas[i] - self.C)
                         H = min(self.C, self.alphas[j] + self.alphas[i])
 
                     if L == H:
@@ -126,6 +135,7 @@ class simple_svm:
             else:
                 passes_count = 0
 
+        self._time_to_fit = time() - st
         # save support vectors ids
         self.support_vectors = np.where(self.alphas > 0)[0]
 
@@ -138,6 +148,28 @@ class simple_svm:
         predictions = self.predict(self.x)
         return metrics.accuracy_score(self.y, predictions)
 
+    def compare_to_sklearn(self):
+        sklearn_model = sklearn.svm.SVC(C=self.C, kernel=self._kernel_type)
+        st = time()
+        sklearn_model.fit(X=self.x, y=self.y)
+        time_sklearn = time() - st
+        sklearn_prediction = sklearn_model.predict(X=self.x)
+        sklearn_prediction[sklearn_prediction == 0] = -1  # although sklearn.svm also use -1/1 convention
+
+        my_prediction = self.predict(x=self.x)
+
+        # compare #
+        mult_pred = my_prediction * sklearn_prediction
+        n_right = sum(mult_pred > 0)
+        print("\nSimpleSvm vs sklearn.svm.SVC:\n=============================\n")
+        print("n={} | equal={} | unequal={}".format(self.n, n_right, self.n-n_right))
+        print("Train accuracy:      SimpleSvm={} | sklearn={}".
+              format(self.get_tr_accuracy(), sklearn_model.score(self.x, self.y)))
+        print("Num support vectors: SimpleSvm={} | sklearn={}".
+              format(len(self.support_vectors), len(sklearn_model.support_vectors_)))
+        print("Training time:       SimpleSvm={0:.3f} sec | sklearn={1:.3f} sec".format(self._time_to_fit, time_sklearn))
+        return sklearn_model
+
     def visualize_model(self):
         colors_d = {0: 'g', -1: 'g', 1: 'b'}
         colors = [colors_d[val] for val in self.y]
@@ -148,9 +180,10 @@ class simple_svm:
                     c='none',
                     alpha=0.7,
                     linewidths=2)
-        a, b = self._get_sv_byclass()
-        plt.plot(a[0], a[1], '--')
-        plt.plot(b[0], b[1], '--')
+        a, b = self._get_sv_by_class()
+        plt.plot(a[:, 0], a[:, 1], marker='d', linestyle='', color='g', label='support vectors -1')
+        plt.plot(b[:, 0], b[:, 1], marker='d', linestyle='', color='b', label='support vectors +1')
+        plt.legend()
         plt.show()
 
     def _calc_f_x(self, x_val):
@@ -162,16 +195,14 @@ class simple_svm:
         if self._kernel_type == 'linear':
             return sum(a * b)
         else:
-            raise Exception("Unsuported kernel")
+            raise Exception("Unsupported kernel")
             return None
 
-    def _get_sv_byclass(self):
+    def _get_sv_by_class(self):
         sv_x = [self.x[xi] for xi in self.support_vectors]
         sv_classes = [self.y[xi] for xi in self.support_vectors]  # self.predict(sv_x)
-
-        a = [sv_x[i] for i, pred in enumerate(sv_classes) if pred==-1]
-        b = [sv_x[i] for i, pred in enumerate(sv_classes) if pred==1]
-
+        a = np.array([sv_x[i] for i, pred in enumerate(sv_classes) if pred == -1])
+        b = np.array([sv_x[i] for i, pred in enumerate(sv_classes) if pred == 1])
         return a, b
 
     def _verify_data(self, x, y):
@@ -186,5 +217,19 @@ class simple_svm:
             return True
 
 
+def main(cluster_std=2.5):
+    # Generate random dataset with 2 classes in 2D space
+    data, labels = sklearn.datasets.make_blobs(centers=2, cluster_std=cluster_std)
 
+    # Show the data
+    vis_data(data, labels)
 
+    # Fit simple SVM model
+    my_svm = SimpleSvm()
+    my_svm.fit(data, labels)
+
+    # Compare to sklearn.svm.SVC
+    sk_svm = my_svm.compare_to_sklearn()
+
+if "__name__" == "__main__":
+    main()
