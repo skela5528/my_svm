@@ -209,7 +209,7 @@ class SimpleSvm:
         if len(x) != len(y):
             print("X and Y contain different number of samples!")
             return False
-        if len(np.unique(l)) > 2:
+        if len(np.unique(y)) > 2:
             print("Currently only 2 classes support!")
             return False
         if 0 in y:
@@ -233,3 +233,4 @@ def main(cluster_std=2.5):
 
 if "__name__" == "__main__":
     main()
+main()
